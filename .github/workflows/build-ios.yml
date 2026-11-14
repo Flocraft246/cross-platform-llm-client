@@ -28,10 +28,10 @@ jobs:
       - name: Build llama.cpp for iOS
         run: bash local_plugins/llama_flutter_android/scripts/build_llama_ios.sh
 
-      # ---- 2. LiteRT-LM frameworks (slow: 30-90 min the first time, cached after) ----
+      # ---- 2. LiteRT-LM frameworks (slow the first time, cached after) ----
       - name: Restore LiteRT-LM frameworks from cache
         id: litert-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: local_plugins/flutter_litert_lm/ios/Frameworks
           key: litert-${{ hashFiles('local_plugins/flutter_litert_lm/scripts/build_ios_frameworks.sh') }}
@@ -40,9 +40,24 @@ jobs:
         if: steps.litert-cache.outputs.cache-hit != 'true'
         run: bash local_plugins/flutter_litert_lm/scripts/build_ios_frameworks.sh
 
+      # Save right away, so a failure in a later step doesn't throw this away
+      - name: Save LiteRT-LM frameworks to cache
+        if: steps.litert-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: local_plugins/flutter_litert_lm/ios/Frameworks
+          key: litert-${{ hashFiles('local_plugins/flutter_litert_lm/scripts/build_ios_frameworks.sh') }}
+
       # ---- 3. The app itself ----
+      # Some plugins (e.g. device_info_plus 12.4) need the iOS 26 SDK -> Xcode 26
+      - name: Switch to Xcode 26
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
       - name: Flutter build (no code signing)
         run: |
+          xcodebuild -version
           flutter pub get
           flutter build ios --release --no-codesign
 

@@ -1,0 +1,59 @@
+name: Build iOS IPA (unsigned)
+
+on:
+  workflow_dispatch:   # start it by hand from the Actions tab
+
+jobs:
+  build-ios:
+    runs-on: macos-15          # Apple Silicon runner (needed for the LiteRT-LM build)
+    timeout-minutes: 300
+
+    steps:
+      - name: Check out code (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: true
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install build tools
+        run: brew install ninja bazelisk || true
+
+      # ---- 1. llama.cpp for iOS (a few minutes) ----
+      - name: Build llama.cpp for iOS
+        run: bash local_plugins/llama_flutter_android/scripts/build_llama_ios.sh
+
+      # ---- 2. LiteRT-LM frameworks (slow: 30-90 min the first time, cached after) ----
+      - name: Restore LiteRT-LM frameworks from cache
+        id: litert-cache
+        uses: actions/cache@v4
+        with:
+          path: local_plugins/flutter_litert_lm/ios/Frameworks
+          key: litert-${{ hashFiles('local_plugins/flutter_litert_lm/scripts/build_ios_frameworks.sh') }}
+
+      - name: Build LiteRT-LM frameworks
+        if: steps.litert-cache.outputs.cache-hit != 'true'
+        run: bash local_plugins/flutter_litert_lm/scripts/build_ios_frameworks.sh
+
+      # ---- 3. The app itself ----
+      - name: Flutter build (no code signing)
+        run: |
+          flutter pub get
+          flutter build ios --release --no-codesign
+
+      - name: Package as .ipa
+        run: |
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry PrivateLM-unsigned.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: PrivateLM-unsigned-ipa
+          path: PrivateLM-unsigned.ipa
